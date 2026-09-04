@@ -1,0 +1,830 @@
+Trendin LLM Query Builder - Complete Recreation Guide
+Single consolidated document containing ALL prompts, logic, and code needed to recreate this tool.
+
+Table of Contents
+Overview
+Architecture
+Environment Variables
+10-Step Pipeline
+Complete AI Prompts
+Web Crawler Logic
+News & Trends Service
+Brand Filtering Logic
+Export Format
+API Endpoints
+Overview
+Trendin LLM Query Builder generates 100+ natural, brand-free search queries optimized for LLM visibility.
+
+Key Features
+95% generic queries (no brand names) + 5% branded queries (target brand only)
+Region-specific analysis (US, UK, UAE, India, Switzerland, etc.)
+Web crawling with auto-translation for non-English pages
+Industry tagging to ensure relevant content
+Google News integration via SERP API
+Knowledge Graph enrichment via Google KG API
+Twitter/X trends integration (optional)
+Output
+100+ unique search queries with intent classification
+CSV export: query, topic, intent, country_iso_code
+Architecture
+Tech Stack
+Frontend: React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui
+Backend:  Express.js + TypeScript
+AI:       OpenAI API (gpt-4o-mini)
+APIs:     SERP API, Google Knowledge Graph API, Twitter/X API v2
+File Structure
+server/
+├── ai-prompts.ts          # All AI prompts (686 lines)
+├── ai-service.ts          # OpenAI orchestration (570 lines)
+├── web-crawler.ts         # Web crawling + translation (737 lines)
+├── serp-news-service.ts   # Google News via SERP API (541 lines)
+├── trending-service.ts    # Trend aggregation
+├── knowledge-graph.ts     # Google KG enrichment
+├── routes.ts              # 10-step pipeline (438 lines)
+├── storage.ts             # In-memory data storage
+└── index.ts               # Express server
+client/src/
+├── pages/home.tsx         # Main UI
+├── hooks/use-analysis.ts  # API hooks
+└── components/            # UI components
+shared/
+└── schema.ts              # TypeScript types + Zod schemas
+Environment Variables
+# Required
+AI_INTEGRATIONS_OPENAI_API_KEY=sk-...
+AI_INTEGRATIONS_OPENAI_BASE_URL=https://api.openai.com/v1
+SERPAPI_KEY=your_serpapi_key
+# Optional
+GOOGLE_KNOWLEDGE_GRAPH_API_KEY=your_kg_key
+TWITTER_BEARER_TOKEN=your_twitter_token
+DATABASE_URL=postgresql://...
+10-Step Pipeline
+Pipeline Flow (server/routes.ts)
+async function processAnalysis(id: string) {
+  const analysis = await storage.getAnalysis(id);
+  const region = analysis.region || 'us';
+  const data: any = {};
+  // Step 0: Web Crawl
+  const crawledData = await aiService.crawlWebsite(analysis.domain);
+  
+  // Step 1: Domain Analysis
+  data.domainAnalysis = await aiService.generateDomainAnalysis(
+    analysis.domain, crawledData, region
+  );
+  // Step 2: Entity Extraction + Knowledge Graph Enrichment
+  data.entities = await aiService.generateEntities(
+    analysis.domain, data.domainAnalysis, crawledData, region
+  );
+  // Optional: Enrich with Google Knowledge Graph
+  if (kgApiKey) {
+    const { enrichedEntities, triples } = await enrichEntitiesWithKnowledgeGraph(
+      kgApiKey, data.entities
+    );
+    data.kgTriples = triples;
+  }
+  // Step 3: Semantic Expansion
+  data.expand = await aiService.generateExpansion(
+    data.entities, analysis.domain, crawledData, data.kgTriples
+  );
+  // Step 4: Knowledge Graph
+  data.graph = await aiService.generateGraph(data.entities, data.expand);
+  // Step 5: Pain Points
+  data.painPoints = await aiService.generatePainPoints(
+    analysis.domain, data.entities, crawledData, region, data.domainAnalysis
+  );
+  // Step 6: Jobs-to-be-Done
+  data.jtbd = await aiService.generateJTBD(
+    analysis.domain, data.painPoints, data.entities, data.domainAnalysis, region
+  );
+  // Step 7: Goals Framework
+  data.goals = await aiService.generateGoals(
+    analysis.domain, data.jtbd, data.domainAnalysis, region
+  );
+  // Step 8: Personas
+  data.personas = await aiService.generatePersonas(
+    analysis.domain, data.painPoints, data.entities, data.jtbd, region
+  );
+  // Step 9: Trending Insights (Google News + Twitter)
+  data.trending = await generateTrendingInsights(
+    data.entities, data.painPoints, data.jtbd, twitterToken,
+    analysis.domain, personasList, domainContext, region, brandName
+  );
+  // Step 10: Query Generation
+  // 10a. Generate 95% generic queries
+  const aiQueries = await aiService.generateQueries(
+    analysis.domain, data.personas, data.painPoints, 
+    data.entities, data.trending, data.goals, data.domainAnalysis
+  );
+  
+  // 10b. Add news-based queries
+  const newsQueries = data.trending.newsBasedQueries;
+  
+  // 10c. Deduplicate
+  let uniqueQueries = deduplicateQueries([...newsQueries, ...aiQueries]);
+  
+  // 10d. Generate supplementary queries if < 100
+  if (uniqueQueries.length < 100) {
+    const supplementary = await aiService.generateSupplementaryQueries(...);
+    uniqueQueries = deduplicateQueries([...uniqueQueries, ...supplementary]);
+  }
+  
+  // 10e. Filter out branded queries
+  const filtered = uniqueQueries.filter(q => !containsBrand(q.query, brandBlacklist));
+  
+  // 10f. Add 5% branded queries
+  const brandedQueries = await aiService.generateBrandedQueries(
+    analysis.domain, productCategory, Math.ceil(filtered.length * 0.05)
+  );
+  
+  data.queries = [...filtered, ...brandedQueries];
+}
+Complete AI Prompts
+System Prompt
+You are a market intelligence expert specializing in comprehensive domain analysis for LLM visibility optimization.
+Your role is to:
+1. Extract actionable entities, attributes, and values from brands/products
+2. Map relationships between concepts using knowledge graph principles
+3. Identify user pain points and jobs-to-be-done
+4. Create realistic personas with natural search behaviors
+5. Generate queries that optimize for LLM answer engine visibility
+Always return valid, parseable JSON. Be specific, realistic, and focused on practical insights that help businesses understand how to appear in AI-generated answers.
+Region Configuration
+const REGION_NAMES: Record<string, string> = {
+  us: "United States",
+  uk: "United Kingdom", 
+  ae: "United Arab Emirates (UAE)",
+  sa: "Saudi Arabia",
+  in: "India",
+  au: "Australia",
+  de: "Germany",
+  fr: "France",
+  ca: "Canada",
+  sg: "Singapore",
+  ch: "Switzerland",
+};
+const REGION_MAP = {
+  us: { gl: "us", hl: "en", google_domain: "google.com" },
+  uk: { gl: "uk", hl: "en", google_domain: "google.co.uk" },
+  ae: { gl: "ae", hl: "en", google_domain: "google.ae" },
+  sa: { gl: "sa", hl: "en", google_domain: "google.com.sa" },
+  in: { gl: "in", hl: "en", google_domain: "google.co.in" },
+  au: { gl: "au", hl: "en", google_domain: "google.com.au" },
+  de: { gl: "de", hl: "en", google_domain: "google.de" },
+  fr: { gl: "fr", hl: "en", google_domain: "google.fr" },
+  ca: { gl: "ca", hl: "en", google_domain: "google.ca" },
+  sg: { gl: "sg", hl: "en", google_domain: "google.com.sg" },
+  ch: { gl: "ch", hl: "en", google_domain: "google.ch" },
+};
+Prompt 1: Domain Analysis
+domainAnalysis: (domain: string, crawledData?: any, region: string = "us") => {
+  const regionName = REGION_NAMES[region];
+  const crawlContext = crawledData?.extractedData ? `
+CRAWLED WEBSITE DATA:
+Product Name: ${crawledData.extractedData.productName}
+Tagline: ${crawledData.extractedData.tagline}
+Features: ${crawledData.extractedData.features.join(", ")}
+Solutions: ${crawledData.extractedData.solutions.join(", ")}
+Industries: ${crawledData.extractedData.industries.join(", ")}
+Use Cases: ${crawledData.extractedData.useCases.join(", ")}
+` : `WARNING: No pages could be crawled. Analyze based on domain URL only.`;
+  return `You are a market intelligence analyst. Analyze this EXACT domain/brand: "${domain}"
+CRITICAL: You MUST analyze ONLY the domain "${domain}" - not any similar domains.
+IMPORTANT - TARGET MARKET REGION: ${regionName}
+This business operates in or targets the ${regionName} market. All analysis MUST be region-specific:
+- Competitors MUST be brands that actually compete in ${regionName} (NOT US-only brands)
+- Customer types should reflect ${regionName} demographics and preferences
+- Business models should be relevant to ${regionName} market conditions
+${crawlContext}
+Based on the crawled data (if available) or the domain URL itself, provide:
+1. Domain definition (2-3 sentences describing what the brand/product does)
+2. Product offering summary (what specific value they provide)
+3. Key subdomains (3-5 specific areas/verticals they operate in)
+4. Typical customer types (3-5 segments who use this product in ${regionName})
+5. Market maturity in ${regionName} (early/developing/saturated)
+6. Common business models in ${regionName} (3-5 models in this space)
+7. Major competitors in ${regionName} (5-7 competing brands that ACTUALLY OPERATE in ${regionName})
+Return ONLY valid JSON:
+{
+  "definition": "...",
+  "productOffering": "...",
+  "industry": "Primary industry category (e.g., Cosmetic Surgery, SaaS, E-commerce)",
+  "industrySubcategory": "Specific subcategory (e.g., Facial Aesthetics, Project Management)",
+  "subdomains": ["...", "..."],
+  "customerTypes": ["...", "..."],
+  "marketMaturity": "...",
+  "businessModels": ["...", "..."],
+  "competitors": ["...", "..."]
+}`;
+}
+Prompt 2: Entity Extraction
+entities: (domain: string, domainAnalysis: any, crawledData?: any, region: string = "us") => {
+  const regionName = REGION_NAMES[region];
+  const industry = domainAnalysis.industry || "";
+  
+  return `Based on this domain/brand: "${domain}"
+TARGET MARKET: ${regionName}
+INDUSTRY: ${industry}
+All entities should be relevant to the ${regionName} market and the ${industry} industry.
+Domain context: ${domainAnalysis.definition}
+Product offering: ${domainAnalysis.productOffering || ""}
+Extract entities as ATTRIBUTES and VALUES that this product/service offers:
+- What attributes does the product have in the ${industry} industry?
+- What values does it provide to users in ${regionName}?
+- What problems does it solve for ${regionName} customers in ${industry}?
+Categories to extract:
+1. Core Features (5-10 specific capabilities in ${industry})
+2. Products/Services (5-10 specific ${industry} offerings)
+3. Value Propositions (5-8 key benefits relevant to ${regionName})
+4. Use Cases (5-10 specific ${industry} applications in ${regionName})
+5. Target Industries (5-8 verticals - must include "${industry}")
+6. User Types/Roles (5-8 job titles or user types in ${regionName})
+7. Technical Attributes (5-8 technical features)
+8. Competitor Keywords (5-8 brands that compete in ${regionName} ${industry} market)
+IMPORTANT: Tag each category with industry context.
+Return ONLY valid JSON:
+[
+  {
+    "category": "Core Features",
+    "items": ["feature1", "feature2", ...],
+    "attributes": {
+      "feature1": ["attribute1", "attribute2"]
+    }
+  },
+  ...
+]`;
+}
+Prompt 3: Semantic Expansion
+expand: (entities: any[], domain: string, crawledData?: any, kgTriples?: any[]) => {
+  const kgContext = kgTriples?.length > 0 ? `
+KNOWLEDGE GRAPH TRIPLES (from Google Knowledge Graph):
+${JSON.stringify(kgTriples.slice(0, 15), null, 2)}
+Use these to inform your expansion.
+` : "";
+  return `Perform semantic expansion on these entities from ${domain}:
+${JSON.stringify(entities.slice(0, 5), null, 2)}
+${kgContext}
+Create TRIPLES that map each entity to industries and topics:
+- Entity -> Industry mapping (what industries use this)
+- Entity -> Topic mapping (what topics/themes it relates to)
+- Entity -> Attribute -> Value (structured facts)
+For each key entity (10-15 total), provide:
+1. Expanded related terms (synonyms, variations)
+2. Industry mappings
+3. Topic mappings
+4. Triples in format: Entity - Attribute - Value
+Return ONLY valid JSON:
+{
+  "expansions": {
+    "Entity Name": ["related term 1", "synonym", ...],
+    ...
+  },
+  "industryMappings": {
+    "Entity Name": ["Industry 1", "Industry 2", ...],
+    ...
+  },
+  "topicMappings": {
+    "Entity Name": ["Topic 1", "Theme 1", ...],
+    ...
+  },
+  "triples": [
+    {"entity": "...", "attribute": "enables", "value": "...", "industry": "...", "topic": "...", "source": "ai", "confidence": 0.85},
+    ...
+  ]
+}`;
+}
+Prompt 4: Knowledge Graph
+graph: (entities: any[], expand: any) => `Create a knowledge graph structure:
+Entities:
+${JSON.stringify(entities.slice(0, 4), null, 2)}
+Expansions:
+${JSON.stringify(expand, null, 2)}
+Build a graph with:
+1. Category nodes: One node for each entity category with type "category"
+2. Entity nodes: Each specific entity/item as a node with type "entity"
+3. Edges: Relationships (contains, enables, solves, targets, competes_with)
+4. Clusters: Group related nodes into logical clusters
+Return ONLY valid JSON:
+{
+  "nodes": [
+    {"id": "cat-1", "label": "Core Features", "type": "category", "group": "categories"},
+    {"id": "node-1", "label": "Feature Name", "type": "entity", "group": "core features"},
+    ...
+  ],
+  "edges": [
+    {"from": "cat-1", "to": "node-1", "relationship": "contains", "weight": 1},
+    ...
+  ],
+  "clusters": [
+    {"id": "cluster-1", "label": "Core Product", "nodes": ["cat-1", "node-1"]},
+    ...
+  ]
+}`
+Prompt 5: Pain Points
+painPoints: (domain: string, entities: any[], crawledData?: any, region: string = "us", domainAnalysis?: any) => {
+  const regionName = REGION_NAMES[region];
+  const industry = domainAnalysis?.industry || "";
+  
+  return `Identify customer pain points that ${domain} addresses for customers in ${regionName}.
+TARGET MARKET: ${regionName}
+INDUSTRY: ${industry}
+CRITICAL - INDUSTRY-SPECIFIC PAIN POINTS:
+All pain points MUST be directly related to the ${industry} industry.
+- For a plastic surgery clinic: pain points about appearance, aging, body confidence (NOT general mental health)
+- For a SaaS tool: pain points about workflow, productivity, integration (NOT unrelated business issues)
+All pain points should be relevant to customers in ${regionName}:
+- Local ${industry} market conditions and challenges
+- Regional preferences and cultural factors
+- ${regionName}-specific problems
+Categories: Functional, Emotional, Operational, Financial, Strategic
+For each pain point (10-15 total), map it to:
+- The product features that solve it
+- The entities involved (must be ${industry}-specific)
+- The user impact in the ${regionName} market
+Return ONLY valid JSON:
+[
+  {
+    "type": "Functional",
+    "symptom": "What the user experiences",
+    "root": "Underlying cause",
+    "impact": "Business/personal consequence",
+    "industry": "${industry}",
+    "relatedEntities": ["Entity1", "Entity2"],
+    "solution": "How ${domain} solves this"
+  },
+  ...
+]`;
+}
+Prompt 6: Jobs-to-be-Done (JTBD)
+jtbd: (domain: string, painPoints: any[], entities: any[], domainAnalysis: any, region: string = "us") => {
+  const regionName = REGION_NAMES[region];
+  const industry = domainAnalysis?.industry || "";
+  
+  return `Create Jobs-to-be-Done analysis for ${domain} targeting customers in ${regionName}.
+TARGET MARKET: ${regionName}
+INDUSTRY: ${industry}
+CRITICAL - INDUSTRY-SPECIFIC JTBDs:
+All JTBDs MUST be directly related to the ${industry} industry.
+- JTBDs should be jobs that ${industry} services help accomplish
+- Situations should be triggers related to ${industry} needs
+- Motivations should align with ${industry} outcomes
+For each JTBD (6-10 total), link to specific product offerings:
+Return ONLY valid JSON:
+[
+  {
+    "audience": "Specific user type seeking ${industry} services in ${regionName}",
+    "situation": "When [${industry}-related context/trigger]",
+    "motivation": "I want to [${industry}-related goal]",
+    "barriers": ["Current obstacles in ${regionName} ${industry} market"],
+    "success": "So I can [${industry}-related outcome]",
+    "emotional": "And feel [emotional outcome]",
+    "industry": "${industry}",
+    "relatedProduct": "Specific ${domain} feature",
+    "relatedEntities": ["Entity1", "Entity2"]
+  },
+  ...
+]`;
+}
+Prompt 7: Goals Framework
+goals: (domain: string, jtbd: any[], domainAnalysis: any, region: string = "us") => {
+  const regionName = REGION_NAMES[region];
+  
+  return `Define goals framework for users of ${domain} in ${regionName}.
+TARGET MARKET: ${regionName}
+Goals should reflect what customers in ${regionName} want to achieve.
+Product: ${domainAnalysis.productOffering || domainAnalysis.definition}
+JTBDs: ${jtbd.slice(0, 4).map(j => j.motivation).join("; ")}
+Create a goals hierarchy with specific, measurable objectives:
+Return ONLY valid JSON:
+{
+  "immediate": [
+    {"goal": "Specific immediate goal for ${regionName} customers", "metric": "How to measure success"},
+    ...
+  ],
+  "shortTerm": [
+    {"goal": "30-90 day goal", "metric": "Success metric"},
+    ...
+  ],
+  "longTerm": [
+    {"goal": "6-12 month goal", "metric": "Success metric"},
+    ...
+  ],
+  "antiGoals": ["What users want to AVOID"],
+  "brandGoals": ["What ${domain} helps users achieve"]
+}`;
+}
+Prompt 8: Personas
+personas: (domain: string, painPoints: any[], entities: any[], jtbd: any[], region: string = "us") => {
+  const regionName = REGION_NAMES[region];
+  const brandName = domain.replace(/^(https?:\/\/)?(www\.)?/, '').split('.')[0];
+  
+  return `Create detailed personas for ${domain} users in ${regionName}.
+TARGET MARKET: ${regionName}
+CRITICAL: All personas MUST be based in ${regionName} and reflect:
+- ${regionName}-specific demographics (names, locations, cultural backgrounds)
+- Local lifestyle, work patterns, and preferences
+- Regional shopping/buying behaviors
+- ${regionName}-specific pain points and motivations
+DO NOT create US-centric personas unless the region is United States.
+Create 4-6 distinct personas representing different user segments:
+IMPORTANT FOR QUERIES:
+- Each persona's queries must be NATURAL user questions
+- NEVER include brand names like "${brandName}" in queries
+- Queries should be about problems, goals, or jobs-to-be-done
+- Examples of GOOD queries: "best shower filter for hard water", "how to fix dry hair naturally"
+- Examples of BAD queries: "${brandName} reviews", "is ${brandName} worth it"
+Return ONLY valid JSON:
+[
+  {
+    "name": "Creative, memorable name appropriate for ${regionName}",
+    "role": "Job title/background common in ${regionName}",
+    "demographics": "Age, city/area in ${regionName}, tech-savviness",
+    "psychographics": "Values, attitudes, lifestyle",
+    "goal": "Primary objective",
+    "painPoints": ["Pain 1", "Pain 2", "Pain 3"],
+    "behaviors": ["Behavior 1", "Behavior 2", "Behavior 3"],
+    "decisionStyle": "How they make decisions",
+    "channels": ["Channels popular in ${regionName}"],
+    "quotes": ["Realistic quote 1", "Realistic quote 2"],
+    "queries": ["Natural problem-based query", "Goal-seeking question", "How-to query"],
+    "relatedEntities": ["Entity this persona cares most about"]
+  },
+  ...
+]`;
+}
+Prompt 9: Main Query Generation (100+ Generic Queries)
+queries: (_domain: string, personas: any[], painPoints: any[], entities: any[], trending?: any, goals?: any, domainAnalysis?: any) => {
+  // NOTE: _domain is NOT used in prompt - queries must be 100% generic
+  const industry = domainAnalysis?.industry || "";
+  
+  const industryContext = industry ? `
+INDUSTRY CONTEXT:
+Primary Industry: ${industry}
+All queries must be relevant to the ${industry} industry.
+` : "";
+  const goalsContext = goals ? `
+USER GOALS (what users want to achieve):
+- Immediate: ${goals.immediate?.slice(0, 3).map(g => g.goal).join("; ")}
+- Short-term: ${goals.shortTerm?.slice(0, 3).map(g => g.goal).join("; ")}
+- Anti-goals: ${goals.antiGoals?.slice(0, 3).join("; ")}
+` : "";
+  const personaList = personas.slice(0, 6).map(p => ({
+    name: p.name, role: p.role, goal: p.goal, painPoints: p.painPoints?.slice(0, 3)
+  }));
+  
+  const jtbdContext = `
+PERSONAS AND THEIR JOBS TO BE DONE:
+${personaList.map(p => `- "${p.name}" (${p.role})
+  JTBD: "${p.goal}"
+  Pain Points: ${p.painPoints.join("; ")}`).join("\n")}
+`;
+  const painContext = `
+USER PAIN POINTS:
+${painPoints.slice(0, 10).map(p => `- ${p.symptom} [${p.type}]`).join("\n")}
+`;
+  const entityContext = `
+KEY ENTITIES AND FEATURES:
+${entities.slice(0, 4).map(e => `- ${e.category}: ${e.items?.slice(0, 6).join(", ")}`).join("\n")}
+`;
+  return `You are generating natural search queries that real users would type.
+${industryContext}
+ABSOLUTE RULE - ZERO BRAND/COMPANY NAMES:
+- NEVER include ANY brand names, company names, product names, or domain names
+- This includes: competitor names, well-known brands, startup names, ANY proper nouns that are brands
+- Queries must be 100% GENERIC - only describing problems, goals, features, or solution categories
+- If you include ANY brand name, the entire output is invalid
+EXAMPLES OF CORRECT QUERIES (generic, problem-focused):
+- "best VPN for streaming Netflix"
+- "how to browse internet privately"
+- "secure wifi connection public hotspot"
+EXAMPLES OF INCORRECT QUERIES (contain brand names - NEVER DO THIS):
+- "ExpressVPN vs NordVPN" ❌
+- "is ExpressVPN good for streaming" ❌
+- Any query mentioning ANY brand ❌
+THE CORE PRINCIPLE:
+Users search for SOLUTIONS TO PROBLEMS, not brand names.
+Generate queries that describe what users NEED, not what they already know.
+${entityContext}
+${painContext}
+${jtbdContext}
+${goalsContext}
+QUERY CATEGORIES TO GENERATE:
+1. PROBLEM-BASED QUERIES (25+ queries)
+   User is experiencing an issue and seeking understanding/solution
+   - "why is my internet slow when using VPN"
+   - "how to stop ISP from tracking browsing history"
+2. GOAL-BASED QUERIES (20+ queries)
+   User wants to achieve a specific outcome
+   - "watch geo-restricted content safely"
+   - "secure my home wifi network"
+3. TASK-BASED QUERIES (20+ queries)
+   User is trying to complete a specific job
+   - "unblock websites at work"
+   - "set up VPN on smart TV"
+4. FEATURE QUERIES (15+ queries)
+   User researching solution capabilities (NO brand names)
+   - "VPN with split tunneling feature"
+   - "fastest VPN protocol for gaming"
+5. COMPARISON QUERIES (10+ queries)
+   Comparing SOLUTION TYPES or FEATURES, not brands
+   - "WireGuard vs OpenVPN speed"
+   - "free VPN vs paid VPN security"
+6. TREND-BASED QUERIES (10+ queries)
+   Based on current trending topics
+REQUIREMENTS:
+- Generate AT LEAST 100 unique queries
+- ZERO DUPLICATES
+- Every query MUST be grammatically correct
+INTENT DISTRIBUTION:
+- Informational (40%): Learning about problem or solution
+- Commercial (40%): Researching and comparing options
+- Transactional (20%): Ready to find/get a solution
+OUTPUT FORMAT - Return ONLY valid JSON array:
+[
+  {
+    "query": "how to securely browse on public wifi",
+    "intent": "Informational",
+    "source": "pain-point",
+    "keywordType": "how-to",
+    "persona": "Business Traveler",
+    "funnelStage": "awareness",
+    "painPoint": "Security risk on public networks",
+    "goal": "Stay safe while working remotely",
+    "jtbd": "Protect sensitive work data on untrusted networks",
+    "isTrending": false,
+    "trendEntity": "",
+    "icpMatch": "Frequent traveler needing secure connections",
+    "jtbdMatch": "When working from hotels/airports, I need to protect my data"
+  },
+  ...
+]
+FINAL CHECK: Verify ZERO brand names appear in ANY query field.`;
+}
+Prompt 10: Branded Queries (5%)
+brandedQueries: (brandName: string, productCategory: string, count: number = 5) => {
+  return `Generate exactly ${count} BRANDED navigational search queries for the brand "${brandName}".
+These are queries where users are specifically looking for this brand.
+BRAND: ${brandName}
+PRODUCT CATEGORY: ${productCategory}
+Generate ${count} branded queries in these patterns:
+1. "[brand] official website" - Finding the official site
+2. "[brand] reviews" - Looking for reviews
+3. "[brand] pricing" - Checking prices
+4. "[brand] login" or "[brand] account" - Accessing account
+5. "[brand] vs [category] alternatives" - Comparing with category
+RULES:
+- Use ONLY the brand name "${brandName}" - no other brands
+- Queries should be natural navigational searches
+- Do NOT include competitor brand names
+Return JSON array:
+[
+  {
+    "query": "${brandName} official website",
+    "intent": "Navigational",
+    "source": "branded",
+    "keywordType": "navigational",
+    "persona": "Existing Customer",
+    "funnelStage": "decision",
+    "painPoint": "",
+    "goal": "Find official brand site",
+    "jtbd": "Access brand directly",
+    "isTrending": false,
+    "trendEntity": "",
+    "icpMatch": "User already aware of brand",
+    "jtbdMatch": "When I want to visit the brand, I search for it directly"
+  }
+]`;
+}
+Web Crawler Logic
+Key Functions
+// Normalize domain URL
+function normalizeDomain(domain: string): string {
+  let normalized = domain.trim().toLowerCase();
+  if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+    normalized = "https://" + normalized;
+  }
+  return normalized;
+}
+// Pages to crawl (minimum 5)
+const priorityPaths = [
+  '',           // Homepage (REQUIRED)
+  '/features',  // Features page (REQUIRED)
+  '/pricing',   // Pricing page (REQUIRED)
+  '/solutions', // Solutions page
+  '/products',  // Products listing
+  '/about',     // About page
+  '/use-cases', // Use cases
+];
+// Detect if content is English
+function isEnglishContent(text: string): boolean {
+  const englishWords = ['the', 'and', 'is', 'in', 'to', 'of', 'for', 'with'];
+  const lowerText = text.toLowerCase();
+  const words = lowerText.split(/\s+/);
+  let englishWordCount = 0;
+  for (const word of words) {
+    if (englishWords.includes(word)) englishWordCount++;
+  }
+  return (englishWordCount / words.length) >= 0.05;
+}
+// Translate non-English content
+async function translateToEnglish(content: PageContent): Promise<PageContent> {
+  const response = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [
+      {
+        role: "system",
+        content: `You are a translator. Translate the webpage content to English. 
+Return ONLY a valid JSON object with the exact same structure as the input.`
+      },
+      { role: "user", content: JSON.stringify(content) }
+    ],
+    response_format: { type: "json_object" }
+  });
+  return JSON.parse(response.choices[0].message.content);
+}
+News & Trends Service
+SERP API Configuration
+const REGION_MAP = {
+  us: { gl: "us", hl: "en", google_domain: "google.com" },
+  uk: { gl: "uk", hl: "en", google_domain: "google.co.uk" },
+  ch: { gl: "ch", hl: "en", google_domain: "google.ch" },
+  // ... all regions use hl: "en" for English results
+};
+async function fetchNewsForEntity(
+  entity: string, 
+  apiKey: string, 
+  gl: string, 
+  hl: string, 
+  google_domain: string
+): Promise<NewsArticle[]> {
+  const response = await getJson({
+    engine: "google_news",
+    api_key: apiKey,
+    q: entity,
+    gl: gl,       // Country code (us, uk, ch, etc.)
+    hl: hl,       // Language code (always "en")
+    google_domain: google_domain,  // Regional Google (google.ch, google.co.uk)
+  });
+  // Filter to last 7 days
+  return response.news_results
+    .filter(article => {
+      const dateStr = article.date?.toLowerCase() || "";
+      return dateStr.includes("hour") || dateStr.includes("day") || 
+             dateStr.includes("yesterday") || dateStr.includes("week");
+    })
+    .slice(0, 15);
+}
+Entity Selection for News (Industry-Specific Only)
+// CRITICAL: Only use SERVICE-SPECIFIC categories for news searches
+// This prevents unrelated trends (e.g., "mental health" for a plastic surgery clinic)
+const serviceSpecificCategories = [
+  "Core Features",      // e.g., "facelift", "rhinoplasty"
+  "Products",           // e.g., "botox", "fillers"
+  "Services",           // e.g., "cosmetic surgery"
+  "Use Cases",          // e.g., "facial rejuvenation"
+  "Target Industries",  // e.g., "cosmetic surgery", "aesthetic medicine"
+];
+// Select top entities from these categories only
+const topEntities = entities
+  .filter(e => serviceSpecificCategories.includes(e.category))
+  .flatMap(e => e.items)
+  .slice(0, 10);
+Brand Filtering Logic
+const KNOWN_BRAND_BLACKLIST = [
+  // VPN brands
+  'expressvpn', 'nordvpn', 'surfshark', 'cyberghost', 'privatevpn',
+  'protonvpn', 'ipvanish', 'purevpn', 'tunnelbear', 'windscribe',
+  // Tech brands
+  'google', 'amazon', 'microsoft', 'apple', 'facebook', 'meta',
+  'netflix', 'disney', 'spotify', 'dropbox', 'slack', 'zoom',
+  // ... more brands
+];
+function buildBrandBlacklist(domain: string, entities: any[], domainAnalysis?: any): string[] {
+  const blacklist = new Set<string>();
+  
+  // Add domain-derived brand name
+  const brandName = domain.replace(/^(https?:\/\/)?(www\.)?/, '')
+    .split('.')[0].split('/')[0].toLowerCase();
+  blacklist.add(brandName);
+  
+  // Add known brands
+  KNOWN_BRAND_BLACKLIST.forEach(b => blacklist.add(b));
+  
+  // Extract competitors from entities
+  for (const entity of entities) {
+    if (entity.category?.toLowerCase().includes('competitor')) {
+      entity.items.forEach((item: string) => blacklist.add(item.toLowerCase()));
+    }
+  }
+  
+  // Extract competitors from domain analysis
+  if (domainAnalysis?.competitors) {
+    domainAnalysis.competitors.forEach((c: string) => blacklist.add(c.toLowerCase()));
+  }
+  
+  return Array.from(blacklist);
+}
+function containsBrand(query: string, blacklist: string[]): boolean {
+  const queryLower = query.toLowerCase();
+  return blacklist.some(brand => {
+    const brandPattern = new RegExp(`\\b${brand}\\b`, 'i');
+    return brandPattern.test(queryLower);
+  });
+}
+Export Format
+CSV Export Endpoint
+app.get("/api/analyses/:id/export", async (req, res) => {
+  const analysis = await storage.getAnalysis(req.params.id);
+  const queries = analysis.data.queries;
+  const region = analysis.region || "us";
+  const topic = analysis.data.domainAnalysis?.industry || "general";
+  
+  const normalizeIntent = (intent: string): string => {
+    const map: Record<string, string> = {
+      "informational": "Informational",
+      "commercial": "Commercial",
+      "transactional": "Transactional",
+      "navigational": "Navigational"
+    };
+    return map[intent.toLowerCase()] || "Informational";
+  };
+  
+  const csv = [
+    "query,topic,intent,country_iso_code",
+    ...queries.map((q: any) => 
+      `${q.query},${topic},${normalizeIntent(q.intent)},${region}`
+    )
+  ].join("\n");
+  res.setHeader("Content-Type", "text/csv");
+  res.setHeader("Content-Disposition", `attachment; filename="queries.csv"`);
+  res.send(csv);
+});
+Example CSV Output
+query,topic,intent,country_iso_code
+how to improve skin elasticity naturally,Cosmetic Surgery,Informational,ch
+best treatments for post-pregnancy body,Cosmetic Surgery,Commercial,ch
+comparison of facial rejuvenation techniques,Cosmetic Surgery,Informational,ch
+drkelly official website,Cosmetic Surgery,Navigational,ch
+drkelly reviews,Cosmetic Surgery,Navigational,ch
+API Endpoints
+Method	Endpoint	Description
+POST	/api/analyses	Create new analysis (body: {domain, region})
+GET	/api/analyses/:id	Get analysis by ID (poll every 2 seconds)
+GET	/api/analyses/:id/export	Export queries as CSV
+GET	/api/analyses	List recent analyses
+Request/Response Examples
+Create Analysis:
+
+POST /api/analyses
+{
+  "domain": "drkelly.ch",
+  "region": "ch"
+}
+Response:
+{
+  "id": "abc123",
+  "domain": "drkelly.ch",
+  "region": "ch",
+  "status": "processing",
+  "currentStep": "domain"
+}
+Poll Status:
+
+GET /api/analyses/abc123
+Response:
+{
+  "id": "abc123",
+  "domain": "drkelly.ch",
+  "region": "ch",
+  "status": "completed",
+  "currentStep": "queries",
+  "data": {
+    "domainAnalysis": {...},
+    "entities": [...],
+    "painPoints": [...],
+    "jtbd": [...],
+    "personas": [...],
+    "queries": [...]
+  }
+}
+Key Design Decisions
+Domain NOT passed to query prompt: Prevents brand contamination in queries
+Industry tagging: Every step includes industry context for relevance
+Region-specific analysis: Competitors, personas, and trends are region-specific
+English-only output: All regions use hl=en; non-English pages auto-translated
+95/5 split: 95% generic queries + 5% branded navigational queries
+Deduplication: Queries normalized and deduplicated
+Supplementary generation: If <100 queries, additional queries generated
+How to Recreate
+Setup Node.js project with Express + TypeScript
+Install dependencies: openai, serpapi, express, zod, drizzle-orm
+Create files:
+server/ai-prompts.ts - Copy all prompts above
+server/ai-service.ts - OpenAI wrapper with callAI function
+server/web-crawler.ts - Web crawling + translation
+server/serp-news-service.ts - SERP API integration
+server/routes.ts - 10-step pipeline
+server/storage.ts - In-memory or PostgreSQL storage
+Set environment variables
+Create React frontend with domain/region form
+Add polling to check analysis status every 2 seconds
+Display results for each step with export functionality
