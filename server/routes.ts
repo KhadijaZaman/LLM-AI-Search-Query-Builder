@@ -3,11 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { aiService } from "./ai-service";
 import { crawlWebsite } from "./web-crawler";
-import {
-  extractBrandBlacklist,
-  deduplicateQueries,
-  filterAndEnrichQueries,
-} from "./brand-filter";
+import { buildFinalQueries } from "./query-pipeline";
 import { CreateAnalysisSchema, PIPELINE_STEPS, type ProgressEvent } from "@shared/schema";
 
 const activeStreams = new Map<string, Response[]>();
@@ -184,64 +180,23 @@ async function processAnalysis(id: string) {
       message: "Generating queries...",
     });
 
-    const aiQueries = await aiService.generateQueries(
-      domain,
-      personas,
-      painPoints,
-      entities,
-      crawledData,
-      undefined,
-      goals,
-      domainAnalysis,
-      region,
-      language
+    const finalQueries = await buildFinalQueries(
+      domain, domainAnalysis, entities, painPoints, crawledData,
+      {
+        generateQueries: () => aiService.generateQueries(
+          domain, personas, painPoints, entities, crawledData, goals,
+          domainAnalysis, region, language,
+        ),
+        generateSupplementaryQueries: (existingCount, targetCount) =>
+          aiService.generateSupplementaryQueries(
+            domain, existingCount, targetCount, entities, painPoints,
+            crawledData, domainAnalysis, language,
+          ),
+        generateBrandedQueries: (count) => aiService.generateBrandedQueries(
+          domain, domainAnalysis.industry || "General", count, crawledData, language,
+        ),
+      },
     );
-
-    let allQueries = deduplicateQueries([...aiQueries]);
-
-    const queryTarget = 120;
-    if (allQueries.length < queryTarget) {
-      const supplementary = await aiService.generateSupplementaryQueries(
-        domain,
-        allQueries.length,
-        queryTarget,
-        entities,
-        painPoints,
-        crawledData,
-        domainAnalysis,
-        language
-      );
-      allQueries = deduplicateQueries([...allQueries, ...supplementary]);
-    }
-
-    const brandBlacklist = extractBrandBlacklist(domain, domainAnalysis.competitors);
-    const brandedCount = Math.ceil(allQueries.length * 0.05);
-    const brandedQueries = await aiService.generateBrandedQueries(
-      domain,
-      domainAnalysis.industry || "General",
-      brandedCount,
-      language
-    );
-
-    let finalQueries = filterAndEnrichQueries(allQueries, brandBlacklist, brandedQueries);
-
-    if (finalQueries.length < 100) {
-      const groundedTopUp = await aiService.generateSupplementaryQueries(
-        domain,
-        finalQueries.length,
-        115,
-        entities,
-        painPoints,
-        crawledData,
-        domainAnalysis,
-        language
-      );
-      finalQueries = filterAndEnrichQueries(
-        deduplicateQueries([...finalQueries, ...groundedTopUp]),
-        brandBlacklist,
-        brandedQueries
-      );
-    }
 
     await storage.updateAnalysis(id, {
       queries: finalQueries,

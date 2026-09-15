@@ -53,7 +53,9 @@ EXTRACTED SOLUTIONS: ${(extracted.solutions || []).join("; ") || "N/A"}
 EXTRACTED USE CASES: ${(extracted.useCases || []).join("; ") || "N/A"}`
     : "";
 
-  return `WEBSITE EVIDENCE (source of truth):
+  return `LOCKED WEBSITE SERVICE/PRODUCT FACTS (source of truth):
+Treat the following page evidence as immutable. Generate questions only about services, products, capabilities, audiences, use cases, and pricing details explicitly supported here. Do not add an adjacent industry service because it is common in the industry.
+Use only this evidence for specific services, capabilities, and pricing. Do not invent unsupported details.
 ${structuredEvidence}
 ${pageEvidence}`;
 }
@@ -339,7 +341,6 @@ Return ONLY valid JSON array:
     painPoints: any[],
     entities: any[],
     crawledData?: any,
-    trending?: any,
     goals?: any,
     domainAnalysis?: any,
     region: string = "us",
@@ -410,6 +411,10 @@ BRAND-NAME RULE:
 
 WEBSITE-SPECIFICITY REQUIREMENTS:
 - Every query must map to a service, feature, use case, audience, or pricing consideration supported by the crawled pages
+- Every output MUST be a complete, grammatical question ending with "?"
+- Use a natural question structure such as "What...", "How can...", "Which...", "Can...", "Is...", or "Why..."
+- Never output keyword fragments such as "what is [service]", "how to [service]", "guide [service]", "best [service]", or "Marketing Agencies"
+- Every question must contain enough context to identify the business service being investigated, not just a broad industry label
 - Prefer precise service terminology found on the website over broad industry phrases
 - At least 70% of queries must reference a concrete capability or service evidenced on the website
 - Include commercial questions based on actual pricing/plan evidence when available (cost, plan choice, included limits, billing model)
@@ -444,7 +449,7 @@ INTENT DISTRIBUTION:
 OUTPUT FORMAT - Return ONLY valid JSON array:
 [
   {
-    "query": "natural question about a specific evidenced service or feature",
+    "query": "What does a specific evidenced service help a customer accomplish?",
     "intent": "Informational",
     "source": "feature",
     "keywordType": "how-to",
@@ -482,6 +487,8 @@ These queries should complement existing ${existingCount} queries.
 RULES:
 - NO brand names or company names
 - Every query must relate to a concrete service, feature, use case, audience, or verified pricing detail from the website evidence
+- Every query MUST be a complete grammatical question ending with "?"
+- Do not output keyword fragments or modifier + noun combinations
 - Use the site's specific service terminology; avoid broad, generic industry questions
 - Never invent services, prices, plans, limits, trials, or discounts
 - Natural language that real users would type
@@ -499,22 +506,31 @@ Return ONLY valid JSON array with ${neededCount} queries:
 ]`;
   },
 
-  brandedQueries: (domain: string, productCategory: string, count: number, language: string = "en") => {
+  brandedQueries: (
+    domain: string,
+    productCategory: string,
+    count: number,
+    crawledData?: any,
+    language: string = "en"
+  ) => {
     const brandName = domain.replace(/^(https?:\/\/)?(www\.)?/, "").split(".")[0];
     const languageInstruction = getLanguageInstruction(language);
+    const websiteContext = formatWebsiteEvidence(crawledData);
 
     return `Generate exactly ${count} branded search queries for "${brandName}" in the ${productCategory} industry.
 ${languageInstruction}
-These queries SHOULD include the brand name "${brandName}" as users searching specifically for this brand.
+${websiteContext}
+These queries SHOULD include the brand name "${brandName}" and a service, feature, use case, or pricing detail explicitly supported by the locked website evidence.
+Every query MUST be a complete, grammatical question ending with "?".
 Types of branded queries:
-- Brand + feature: "${brandName} pricing", "${brandName} features"
-- Brand + comparison: "${brandName} vs competitors", "${brandName} alternatives"
-- Brand + review: "${brandName} reviews", "is ${brandName} worth it"
-- Brand + how-to: "how to use ${brandName}", "${brandName} tutorial"
+- Brand + feature: "What features does ${brandName} offer for [verified service]?"
+- Brand + comparison: "How does ${brandName} compare for [verified service]?"
+- Brand + review: "Is ${brandName} effective for [verified use case]?"
+- Brand + pricing: "What does ${brandName} charge for [verified plan or service]?"
 Return ONLY valid JSON array:
 [
   {
-    "query": "${brandName} pricing plans",
+    "query": "What does ${brandName} offer for [verified service]?",
     "intent": "Commercial",
     "source": "branded",
     "topic": "pricing"

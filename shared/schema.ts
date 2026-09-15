@@ -81,7 +81,6 @@ export const QuerySourceSchema = z.enum([
   "goal",
   "jtbd",
   "persona",
-  "trending",
   "feature",
   "comparison",
   "supplementary",
@@ -102,8 +101,6 @@ export const GeneratedQuerySchema = z.object({
   painPoint: z.string().optional(),
   goal: z.string().optional(),
   jtbd: z.string().optional(),
-  isTrending: z.boolean().optional(),
-  trendEntity: z.string().optional(),
   icpMatch: z.string().optional(),
   jtbdMatch: z.string().optional(),
   topic: z.string().optional(),
@@ -243,18 +240,6 @@ export const SemanticExpansionSchema = z.object({
 });
 export type SemanticExpansion = z.infer<typeof SemanticExpansionSchema>;
 
-export const TrendingInsightsSchema = z.object({
-  newsArticles: z.array(z.object({
-    title: z.string(),
-    link: z.string().optional(),
-    source: z.string().optional(),
-    date: z.string().optional(),
-  })).optional(),
-  newsBasedQueries: z.array(GeneratedQuerySchema).optional(),
-  twitterTrends: z.array(z.string()).optional(),
-});
-export type TrendingInsights = z.infer<typeof TrendingInsightsSchema>;
-
 export const AnalysisStatusSchema = z.enum(["pending", "processing", "completed", "error"]);
 export type AnalysisStatus = z.infer<typeof AnalysisStatusSchema>;
 
@@ -275,7 +260,6 @@ export const AnalysisSchema = z.object({
   jtbd: z.array(JTBDSchema).optional(),
   goals: GoalsFrameworkSchema.optional(),
   personas: z.array(PersonaSchema).optional(),
-  trending: TrendingInsightsSchema.optional(),
   queries: z.array(GeneratedQuerySchema).optional(),
   createdAt: z.string(),
   completedAt: z.string().optional(),

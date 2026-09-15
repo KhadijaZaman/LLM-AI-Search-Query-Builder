@@ -10,6 +10,7 @@ import type {
   GoalsFramework,
   Persona,
   GeneratedQuery,
+  CrawledData,
 } from "@shared/schema";
 
 const openai = new OpenAI({
@@ -181,7 +182,6 @@ export const aiService = {
     painPoints: PainPoint[],
     entities: EntityCategory[],
     crawledData?: any,
-    trending?: any,
     goals?: GoalsFramework,
     domainAnalysis?: DomainAnalysis,
     region: string = "us",
@@ -193,7 +193,6 @@ export const aiService = {
       painPoints,
       entities,
       crawledData,
-      trending,
       goals,
       domainAnalysis,
       region,
@@ -231,9 +230,10 @@ export const aiService = {
     domain: string,
     productCategory: string,
     count: number,
+    crawledData?: CrawledData,
     language: string = "en"
   ): Promise<GeneratedQuery[]> {
-    const prompt = prompts.brandedQueries(domain, productCategory, count, language);
+    const prompt = prompts.brandedQueries(domain, productCategory, count, crawledData, language);
     const response = await callAI(prompt, 2048);
     return parseJSON<GeneratedQuery[]>(response, []);
   },

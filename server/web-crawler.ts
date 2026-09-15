@@ -9,12 +9,17 @@ const PAGE_KEYWORDS = {
   features: ["features", "feature", "services", "service", "solutions", "products", "product", "capabilities"],
 } as const;
 
-export async function crawlWebsite(domain: string): Promise<CrawledData> {
+export interface CrawlOptions {
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+}
+
+export async function crawlWebsite(domain: string, options: CrawlOptions = {}): Promise<CrawledData> {
   const baseUrl = domain.startsWith("http") ? domain : `https://${domain}`;
   const url = baseUrl.replace(/\/$/, "");
   
   try {
-    const homepage = await fetchHtml(url);
+    const homepage = await fetchHtml(url, options);
     if (!homepage.ok) {
       return {
         url,
@@ -34,7 +39,7 @@ export async function crawlWebsite(domain: string): Promise<CrawledData> {
 
     const candidates = discoverPageCandidates(html, homepageUrl);
     for (const candidate of candidates) {
-      const page = await fetchHtml(candidate.url);
+      const page = await fetchHtml(candidate.url, options);
       if (!page.ok) continue;
 
       pages.push({
@@ -65,15 +70,16 @@ export async function crawlWebsite(domain: string): Promise<CrawledData> {
   }
 }
 
-async function fetchHtml(url: string): Promise<
+async function fetchHtml(url: string, options: CrawlOptions): Promise<
   | { ok: true; html: string; finalUrl: string }
   | { ok: false; error: string }
 > {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? REQUEST_TIMEOUT_MS;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
+    const response = await (options.fetch ?? fetch)(url, {
       signal: controller.signal,
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -97,7 +103,7 @@ async function fetchHtml(url: string): Promise<
     return {
       ok: false,
       error: error?.name === "AbortError"
-        ? `Request timed out after ${REQUEST_TIMEOUT_MS / 1000} seconds`
+        ? `Request timed out after ${timeoutMs / 1000} seconds`
         : error?.message || "Failed to crawl website",
     };
   } finally {
@@ -111,7 +117,7 @@ function discoverPageCandidates(
 ): Array<{ url: string; kind: "features" | "pricing" }> {
   const origin = new URL(homepageUrl).origin;
   const links: Array<{ url: string; text: string }> = [];
-  const anchorRegex = /<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  const anchorRegex = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = anchorRegex.exec(html)) !== null) {
